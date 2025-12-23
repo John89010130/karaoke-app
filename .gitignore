@@ -1,0 +1,25 @@
+# Backups
+*.backup
+*_backup.js
+app_backup.js
+app.js.backup
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporários
+*.tmp
+temp/
