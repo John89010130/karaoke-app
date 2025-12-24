@@ -1,3 +1,11 @@
+// ====== SUPABASE CONFIGURATION ======
+const SUPABASE_URL = 'https://fkultnzzdlbqqvdvqfzh.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_HvASACZeAEs8zfeaza4vxw_1BYYLfVr';
+
+let supabaseClient = null;
+let currentUser = null;
+let allSingers = [];
+
 // Variáveis globais
 let player;
 let audioContext;
@@ -103,10 +111,20 @@ function onYouTubeIframeAPIReady() {
 // Declarar funções globais no início para evitar erros
 window.searchVideo = null; // Será definida depois
 window.closeYoutubeModal = null; // Será definida depois  
-window.loadFromURL = null; // Será definida depois
-window.closeCustomModal = null; // Será definida depois
 
 // ====== FUNÇÕES DE MODAL (definidas antes de tudo) ======
+function closeCustomModal() {
+    const modal = document.getElementById('customModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+    // Limpar input se existir
+    const inputWrapper = document.getElementById('modalInputWrapper');
+    const input = document.getElementById('modalInput');
+    if (inputWrapper) inputWrapper.style.display = 'none';
+    if (input) input.value = '';
+}
+
 function showCustomModal(options) {
     const modal = document.getElementById('customModal');
     const emoji = document.getElementById('modalEmoji');
@@ -130,15 +148,17 @@ function showCustomModal(options) {
     // Limpar ações anteriores
     actions.innerHTML = '';
     
-    // Botão primário
-    const primaryBtn = document.createElement('button');
-    primaryBtn.className = 'modal-btn modal-btn-primary';
-    primaryBtn.textContent = options.primaryText || 'OK';
-    primaryBtn.onclick = () => {
-        closeCustomModal();
-        if (options.onPrimary) options.onPrimary();
-    };
-    actions.appendChild(primaryBtn);
+    // Botão primário (apenas se tiver texto)
+    if (options.primaryText !== '') {
+        const primaryBtn = document.createElement('button');
+        primaryBtn.className = 'modal-btn modal-btn-primary';
+        primaryBtn.textContent = options.primaryText || 'OK';
+        primaryBtn.onclick = () => {
+            closeCustomModal();
+            if (options.onPrimary) options.onPrimary();
+        };
+        actions.appendChild(primaryBtn);
+    }
     
     // Botão secundário (opcional)
     if (options.secondaryText) {
@@ -153,16 +173,6 @@ function showCustomModal(options) {
     }
     
     modal.classList.add('active');
-}
-
-function closeCustomModal() {
-    const modal = document.getElementById('customModal');
-    modal.classList.remove('active');
-    // Limpar input se existir
-    const inputWrapper = document.getElementById('modalInputWrapper');
-    const input = document.getElementById('modalInput');
-    if (inputWrapper) inputWrapper.style.display = 'none';
-    if (input) input.value = '';
 }
 
 // Modal com input (para substituir prompt)
@@ -224,6 +234,8 @@ function showInputModal(options) {
 }
 
 window.closeCustomModal = closeCustomModal;
+window.showCustomModal = showCustomModal;
+window.showInputModal = showInputModal;
 // ====== FIM DAS FUNÇÕES DE MODAL ======
 
 // Renderizar músicas populares
@@ -542,6 +554,10 @@ function loadFromURL() {
     });
 }
 
+// Exportar função para uso global
+window.loadFromURL = loadFromURL;
+console.log('✅ loadFromURL exportada para window:', typeof window.loadFromURL);
+
 function processYoutubeUrl(url) {
     console.log('📝 URL digitada:', url);
     
@@ -588,6 +604,12 @@ function loadVideo(videoId) {
     
     const container = document.getElementById('videoContainer');
     container.classList.add('active');
+    
+    // Adicionar classe para expandir o player e ocultar busca
+    const videoSection = document.querySelector('.video-section');
+    if (videoSection) {
+        videoSection.classList.add('has-video');
+    }
     
     // Destruir player existente se houver
     if (player && player.destroy) {
@@ -1697,9 +1719,34 @@ function calculateFinalScore() {
             `,
             primaryText: 'Legal!',
             onPrimary: () => {
-                // Após fechar o modal de análise, mostrar opções
+                // Após fechar o modal de análise, perguntar quem cantou
                 setTimeout(() => {
-                    showFinalScoreOptions(finalScore);
+                    // Preparar dados para salvar
+                    const currentVideo = player ? {
+                        videoId: player.getVideoData().video_id,
+                        titulo: player.getVideoData().title,
+                        artista: 'YouTube'
+                    } : {};
+                    
+                    const scoreData = {
+                        total: finalScore,
+                        pitch: breakdown.pitchScore,
+                        ritmo: breakdown.rhythmScore,
+                        consistencia: breakdown.volumeScore,
+                        performance: breakdown.performanceScore,
+                        videoId: currentVideo.videoId,
+                        titulo: currentVideo.titulo,
+                        artista: currentVideo.artista,
+                        cenario: document.getElementById('difficulty').value
+                    };
+                    
+                    // Se estiver logado, pedir quem cantou
+                    if (currentUser && supabaseClient) {
+                        showSingerModal(scoreData);
+                    } else {
+                        // Se não estiver logado, mostrar opções normais
+                        showFinalScoreOptions(finalScore);
+                    }
                 }, 300);
             }
         });
@@ -1917,9 +1964,6 @@ window.searchVideo = async function() {
     }
 };
 
-// ====== EXPORTAR FUNÇÕES GLOBAIS PARA OS BOTÕES ======
-window.loadFromURL = loadFromURL;
-
 // ====== EVENT LISTENERS ======
 document.addEventListener('DOMContentLoaded', function() {
     // Botão de busca
@@ -1937,7 +1981,11 @@ document.addEventListener('DOMContentLoaded', function() {
     if (loadUrlBtn) {
         loadUrlBtn.addEventListener('click', function() {
             console.log('🔗 Botão URL clicado via addEventListener');
-            loadFromURL();
+            if (typeof window.loadFromURL === 'function') {
+                window.loadFromURL();
+            } else {
+                console.error('❌ loadFromURL não está definida');
+            }
         });
     }
     
@@ -1950,4 +1998,493 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+    
+    // ====== INICIALIZAR AUTENTICAÇÃO ======
+    checkAuthState();
+    setupAuthListeners();
 });
+
+// ====== FUNÇÕES DE AUTENTICAÇÃO ======
+
+async function checkAuthState() {
+    // Inicializar supabaseClient se ainda não foi
+    if (!supabaseClient && typeof window.supabase !== 'undefined' && window.supabase.createClient) {
+        try {
+            supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            console.log('✅ Supabase inicializado com sucesso!');
+        } catch (err) {
+            console.error('❌ Erro ao inicializar Supabase:', err);
+            return;
+        }
+    }
+    
+    if (!supabaseClient) {
+        console.warn('⚠️ Supabase SDK não carregado ainda');
+        return;
+    }
+    
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) {
+        currentUser = session.user;
+        updateUIForLoggedIn(session.user);
+    }
+    
+    // Listener para mudanças de autenticação
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN') {
+            currentUser = session.user;
+            updateUIForLoggedIn(session.user);
+        } else if (event === 'SIGNED_OUT') {
+            currentUser = null;
+            updateUIForLoggedOut();
+        }
+    });
+}
+
+function updateUIForLoggedIn(user) {
+    const btnLogin = document.getElementById('btnShowLogin');
+    const btnUserMenu = document.getElementById('btnUserMenu');
+    const userName = document.getElementById('userName');
+    
+    if (btnLogin) btnLogin.style.display = 'none';
+    if (btnUserMenu) btnUserMenu.style.display = 'inline-block';
+    if (userName) userName.textContent = `👤 ${user.email?.split('@')[0] || 'Usuário'}`;
+    
+    console.log('✅ Usuário logado:', user.email);
+    closeAuthModal();
+}
+
+function updateUIForLoggedOut() {
+    const btnLogin = document.getElementById('btnShowLogin');
+    const btnUserMenu = document.getElementById('btnUserMenu');
+    
+    if (btnLogin) btnLogin.style.display = 'inline-block';
+    if (btnUserMenu) btnUserMenu.style.display = 'none';
+    
+    console.log('👋 Usuário deslogado');
+}
+
+function setupAuthListeners() {
+    // Botão de login
+    const btnShowLogin = document.getElementById('btnShowLogin');
+    if (btnShowLogin) {
+        btnShowLogin.addEventListener('click', showAuthModal);
+    }
+    
+    // Botões do modal de autenticação
+    const btnLogin = document.getElementById('btnLogin');
+    const btnSignup = document.getElementById('btnSignup');
+    const btnGoogleLogin = document.getElementById('btnGoogleLogin');
+    const btnUserMenu = document.getElementById('btnUserMenu');
+    
+    if (btnLogin) btnLogin.addEventListener('click', handleLogin);
+    if (btnSignup) btnSignup.addEventListener('click', handleSignup);
+    if (btnGoogleLogin) btnGoogleLogin.addEventListener('click', handleGoogleLogin);
+    if (btnUserMenu) btnUserMenu.addEventListener('click', handleUserMenu);
+}
+
+function showAuthModal() {
+    const modal = document.getElementById('authModal');
+    if (modal) modal.classList.add('active');
+}
+
+function closeAuthModal() {
+    const modal = document.getElementById('authModal');
+    if (modal) modal.classList.remove('active');
+    document.getElementById('authEmail').value = '';
+    document.getElementById('authPassword').value = '';
+}
+
+async function handleLogin() {
+    const email = document.getElementById('authEmail').value.trim();
+    const password = document.getElementById('authPassword').value;
+    
+    if (!email || !password) {
+        showCustomModal({
+            emoji: '⚠️',
+            title: 'Campos Vazios',
+            message: 'Preencha email e senha!',
+            primaryText: 'OK'
+        });
+        return;
+    }
+    
+    if (!supabaseClient) {
+        showCustomModal({
+            emoji: '⚠️',
+            title: 'Supabase não configurado',
+            message: 'Configure o Supabase primeiro!',
+            primaryText: 'OK'
+        });
+        return;
+    }
+    
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    
+    if (error) {
+        showCustomModal({
+            emoji: '❌',
+            title: 'Erro no Login',
+            message: error.message,
+            primaryText: 'OK'
+        });
+    }
+}
+
+async function handleSignup() {
+    const email = document.getElementById('authEmail').value.trim();
+    const password = document.getElementById('authPassword').value;
+    
+    if (!email || !password) {
+        showCustomModal({
+            emoji: '⚠️',
+            title: 'Campos Vazios',
+            message: 'Preencha email e senha!',
+            primaryText: 'OK'
+        });
+        return;
+    }
+    
+    if (!supabaseClient) {
+        showCustomModal({
+            emoji: '⚠️',
+            title: 'Supabase não configurado',
+            message: 'Configure o Supabase primeiro!',
+            primaryText: 'OK'
+        });
+        return;
+    }
+    
+    if (password.length < 6) {
+        showCustomModal({
+            emoji: '⚠️',
+            title: 'Senha Curta',
+            message: 'A senha deve ter no mínimo 6 caracteres!',
+            primaryText: 'OK'
+        });
+        return;
+    }
+    
+    const { data, error } = await supabaseClient.auth.signUp({ email, password });
+    
+    if (error) {
+        showCustomModal({
+            emoji: '❌',
+            title: 'Erro no Cadastro',
+            message: error.message,
+            primaryText: 'OK'
+        });
+    } else {
+        showCustomModal({
+            emoji: '✅',
+            title: 'Conta Criada!',
+            message: 'Verifique seu email para confirmar o cadastro.',
+            primaryText: 'OK'
+        });
+    }
+}
+
+async function handleGoogleLogin() {
+    if (!supabaseClient) {
+        showCustomModal({
+            emoji: '⚠️',
+            title: 'Supabase não configurado',
+            message: 'Configure o Supabase primeiro!',
+            primaryText: 'OK'
+        });
+        return;
+    }
+    
+    // Fechar modal antes de redirecionar para Google
+    closeAuthModal();
+    
+    const { data, error } = await supabaseClient.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+            redirectTo: window.location.origin
+        }
+    });
+    
+    if (error) {
+        showCustomModal({
+            emoji: '❌',
+            title: 'Erro no Login',
+            message: error.message,
+            primaryText: 'OK'
+        });
+    }
+}
+
+function handleUserMenu() {
+    showCustomModal({
+        emoji: '👤',
+        title: 'Menu do Usuário',
+        message: `Logado como: ${currentUser?.email}`,
+        details: '<button onclick="handleLogout()" class="modal-btn modal-btn-secondary" style="width: 100%; margin-top: 1rem;">Sair</button>',
+        primaryText: 'Fechar'
+    });
+}
+
+async function handleLogout() {
+    // Fecha o modal manualmente
+    const modal = document.getElementById('customModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+    
+    try {
+        // Tenta fazer logout do Supabase (mas não bloqueia se falhar)
+        if (supabaseClient && supabaseClient.auth) {
+            try {
+                await supabaseClient.auth.signOut();
+            } catch (e) {
+                console.warn('Aviso ao fazer signOut:', e);
+            }
+        }
+        
+        // Limpa storage local
+        localStorage.clear();
+        sessionStorage.clear();
+        
+        // Limpa variável de usuário
+        currentUser = null;
+        
+        // Recarrega a página
+        window.location.reload();
+    } catch (error) {
+        console.error('Erro no logout:', error);
+        // Mesmo com erro, força reload
+        window.location.reload();
+    }
+}
+
+// ====== FUNÇÕES DE GERENCIAMENTO DE CANTORES ======
+
+async function loadAllSingers() {
+    if (!supabaseClient || !currentUser) return [];
+    
+    const { data, error } = await supabaseClient
+        .from('cantores')
+        .select('*')
+        .order('nome');
+    
+    if (error) {
+        console.error('Erro ao carregar cantores:', error);
+        return [];
+    }
+    
+    allSingers = data || [];
+    return allSingers;
+}
+
+function showSingerModal(scoreData) {
+    if (!currentUser) {
+        showCustomModal({
+            emoji: '🔐',
+            title: 'Login Necessário',
+            message: 'Faça login para salvar suas pontuações!',
+            primaryText: 'Fazer Login',
+            onPrimary: showAuthModal
+        });
+        return;
+    }
+    
+    const modal = document.getElementById('singerModal');
+    if (modal) modal.classList.add('active');
+    
+    loadAllSingers().then(singers => {
+        renderSingersList(singers, scoreData);
+    });
+    
+    // Setup search
+    const searchInput = document.getElementById('singerSearch');
+    if (searchInput) {
+        searchInput.oninput = (e) => {
+            const filtered = allSingers.filter(s => 
+                s.nome.toLowerCase().includes(e.target.value.toLowerCase())
+            );
+            renderSingersList(filtered, scoreData);
+        };
+    }
+    
+    // Botão de novo cantor
+    const btnNewSinger = document.getElementById('btnNewSinger');
+    if (btnNewSinger) {
+        btnNewSinger.onclick = () => createNewSinger(scoreData);
+    }
+}
+
+function closeSingerModal() {
+    const modal = document.getElementById('singerModal');
+    if (modal) modal.classList.remove('active');
+    document.getElementById('singerSearch').value = '';
+}
+
+function renderSingersList(singers, scoreData) {
+    const list = document.getElementById('singersList');
+    if (!list) return;
+    
+    if (singers.length === 0) {
+        list.innerHTML = '<div style="padding: 2rem; text-align: center; color: rgba(255,255,255,0.5);">Nenhum cantor encontrado.<br>Digite um nome e clique em "Cadastrar Novo"</div>';
+        return;
+    }
+    
+    list.innerHTML = singers.map(singer => `
+        <div class="singer-item" onclick="selectSinger('${singer.id}', '${singer.nome}', ${JSON.stringify(scoreData).replace(/"/g, '&quot;')})" 
+            style="padding: 1rem; margin: 0.5rem 0; background: rgba(102, 126, 234, 0.1); border-radius: 8px; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;"
+            onmouseover="this.style.background='rgba(102, 126, 234, 0.2)'; this.style.borderColor='rgba(102, 126, 234, 0.5)';"
+            onmouseout="this.style.background='rgba(102, 126, 234, 0.1)'; this.style.borderColor='transparent';">
+            🎤 ${singer.nome}
+        </div>
+    `).join('');
+}
+
+async function selectSinger(singerId, singerName, scoreData) {
+    closeSingerModal();
+    await saveScore(singerId, singerName, scoreData);
+}
+
+async function createNewSinger(scoreData) {
+    const searchInput = document.getElementById('singerSearch');
+    const nome = searchInput.value.trim();
+    
+    if (!nome) {
+        showCustomModal({
+            emoji: '⚠️',
+            title: 'Nome Vazio',
+            message: 'Digite o nome do cantor antes de cadastrar!',
+            primaryText: 'OK'
+        });
+        return;
+    }
+    
+    // Verificar se já existe
+    const exists = allSingers.find(s => s.nome.toLowerCase() === nome.toLowerCase());
+    if (exists) {
+        showCustomModal({
+            emoji: '⚠️',
+            title: 'Cantor Existe',
+            message: `"${exists.nome}" já está cadastrado! Selecione da lista.`,
+            primaryText: 'OK'
+        });
+        return;
+    }
+    
+    const { data, error } = await supabaseClient
+        .from('cantores')
+        .insert([{ nome }])
+        .select()
+        .single();
+    
+    if (error) {
+        showCustomModal({
+            emoji: '❌',
+            title: 'Erro ao Cadastrar',
+            message: error.message,
+            primaryText: 'OK'
+        });
+        return;
+    }
+    
+    closeSingerModal();
+    await saveScore(data.id, data.nome, scoreData);
+}
+
+async function saveScore(singerId, singerName, scoreData) {
+    if (!currentUser) return;
+    
+    const { error } = await supabaseClient
+        .from('pontuacoes')
+        .insert([{
+            cantor_id: singerId,
+            owner_id: currentUser.id,
+            musica_titulo: scoreData.titulo || 'Sem título',
+            musica_artista: scoreData.artista || 'Desconhecido',
+            video_id: scoreData.videoId || '',
+            pontuacao_total: Math.round(scoreData.total || 0),
+            pontuacao_pitch: Math.round(scoreData.pitch || 0),
+            pontuacao_ritmo: Math.round(scoreData.ritmo || 0),
+            pontuacao_consistencia: Math.round(scoreData.consistencia || 0),
+            pontuacao_performance: Math.round(scoreData.performance || 0),
+            cenario: scoreData.cenario || 'default'
+        }]);
+    
+    if (error) {
+        showCustomModal({
+            emoji: '❌',
+            title: 'Erro ao Salvar',
+            message: error.message,
+            primaryText: 'OK'
+        });
+    } else {
+        showCustomModal({
+            emoji: '🎉',
+            title: 'Pontuação Salva!',
+            message: `Pontuação de ${singerName} foi salva com sucesso!`,
+            details: `<p style="margin-top: 1rem;">Total: <strong>${Math.round(scoreData.total || 0)} pontos</strong></p>`,
+            primaryText: 'Ver Ranking',
+            secondaryText: 'Continuar',
+            onPrimary: showRanking,
+            onSecondary: () => {
+                // Após salvar, mostrar opções de cantar novamente ou escolher outra
+                closeCustomModal();
+                setTimeout(() => {
+                    showFinalScoreOptions(Math.round(scoreData.total || 0));
+                }, 300);
+            }
+        });
+    }
+}
+
+async function showRanking() {
+    closeCustomModal();
+    
+    if (!supabaseClient) return;
+    
+    const { data, error } = await supabaseClient
+        .from('ranking_geral')
+        .select('*')
+        .limit(10);
+    
+    if (error) {
+        showCustomModal({
+            emoji: '❌',
+            title: 'Erro',
+            message: error.message,
+            primaryText: 'OK'
+        });
+        return;
+    }
+    
+    const rankingHTML = data.map((item, index) => `
+        <div style="display: flex; justify-content: space-between; padding: 0.8rem; margin: 0.5rem 0; background: rgba(102, 126, 234, ${index === 0 ? 0.3 : 0.1}); border-radius: 8px;">
+            <span>${index + 1}. ${item.nome}</span>
+            <span style="font-weight: bold;">${item.media_pontos || 0} pts</span>
+        </div>
+    `).join('');
+    
+    showCustomModal({
+        emoji: '🏆',
+        title: 'Ranking Geral',
+        message: 'Top 10 Melhores Cantores',
+        details: `<div style="margin-top: 1rem;">${rankingHTML}</div>`,
+        primaryText: 'Fechar'
+    });
+}
+
+// Mostrar barra de busca novamente
+function showSearchBar() {
+    const videoSection = document.querySelector('.video-section');
+    if (videoSection) {
+        videoSection.classList.remove('has-video');
+    }
+}
+
+// Expor funções globais
+window.closeAuthModal = closeAuthModal;
+window.closeSingerModal = closeSingerModal;
+window.handleLogout = handleLogout;
+window.showSingerModal = showSingerModal;
+window.selectSinger = selectSinger;
+window.showRanking = showRanking;
+window.showSearchBar = showSearchBar;
