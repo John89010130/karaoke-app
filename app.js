@@ -1538,24 +1538,24 @@ function calculateFinalScore() {
     let breakdown = {};
     
     if (notes.length > 0) {
-        // 1. PITCH SCORE (35%) - Estabilidade das notas (mais rigoroso)
+        // 1. PITCH SCORE (40%) - Estabilidade das notas
         const pitchVariance = calculateVariance(pitchHistory);
-        const pitchStability = Math.max(0, 100 - (pitchVariance / 50)); // Mais sensível à variação
-        breakdown.pitchScore = Math.round(pitchStability * 0.35);
+        const pitchStability = Math.max(0, 100 - (pitchVariance / 100)); // Mesmo divisor do tempo real
+        breakdown.pitchScore = Math.round((pitchStability / 100) * 40); // 40% como tempo real
         
         // 2. RHYTHM SCORE (30%) - Consistência temporal
         const avgRhythm = rhythmScores.reduce((a, b) => a + b, 0) / rhythmScores.length || 0;
-        breakdown.rhythmScore = Math.round(avgRhythm * 0.30);
+        breakdown.rhythmScore = Math.round((avgRhythm / 100) * 30); // 30% como tempo real
         
-        // 3. VOLUME/CONSISTENCY SCORE (20%) - Consistência de volume (mais rigoroso)
+        // 3. VOLUME/CONSISTENCY SCORE (20%) - Consistência de volume
         const volumeVariance = calculateVariance(volumeHistory);
-        const volumeConsistency = Math.max(0, 100 - (volumeVariance / 5)); // Mais sensível
-        breakdown.volumeScore = Math.round(volumeConsistency * 0.20);
+        const volumeConsistency = Math.max(0, 100 - (volumeVariance / 10)); // Mesmo divisor do tempo real
+        breakdown.volumeScore = Math.round((volumeConsistency / 100) * 20); // 20% como tempo real
         
-        // 4. PERFORMANCE SCORE (15%) - Quantidade mínima de notas necessária
+        // 4. PERFORMANCE SCORE (10%) - Mesma fórmula do tempo real
         const notesPerSecond = notes.length / duration;
-        const performanceQuality = Math.min(100, notesPerSecond * 15); // Reduzido de 20 para 15
-        breakdown.performanceScore = Math.round(performanceQuality * 0.15);
+        const performanceQuality = Math.min(100, notesPerSecond * 10); // 10% como tempo real
+        breakdown.performanceScore = Math.round((performanceQuality / 100) * 10);
         
         // Score base (máximo de 100 pontos)
         finalScore = breakdown.pitchScore + breakdown.rhythmScore + 
@@ -1584,28 +1584,14 @@ function calculateFinalScore() {
             breakdown.coveragePenalty = coveragePenalty;
         }
         
-        // DEDUÇÃO POR PAUSAS LONGAS
+        // BÔNUS DE STREAK - mesma fórmula do tempo real
+        const streakBonus = Math.floor(currentStreak / STREAK_BONUS_THRESHOLD) * 2; // +2 pts a cada 20 notas
+        finalScore += Math.min(10, streakBonus); // Máximo +10 pts de bônus
+        breakdown.streakBonus = Math.min(10, streakBonus);
+        
+        // DEDUÇÃO POR PAUSAS LONGAS - mesma do tempo real
         finalScore -= Math.round(silencePenalty);
         breakdown.silencePenalty = Math.round(silencePenalty);
-        
-        // Pequenos bônus (máximo +10 pontos no total)
-        let bonusPoints = 0;
-        
-        // Bônus por duração (máx +3)
-        if (duration > 60) bonusPoints += 1;
-        if (duration > 120) bonusPoints += 2;
-        
-        // Bônus por notas (máx +3)
-        if (notes.length > 100) bonusPoints += 1;
-        if (notes.length > 200) bonusPoints += 2;
-        
-        // Bônus por streak (máx +4)
-        const streakBonus = Math.min(4, Math.floor(maxStreak / 20)); // +1 pt a cada 20 notas
-        bonusPoints += streakBonus;
-        breakdown.streakBonus = streakBonus;
-        
-        finalScore += bonusPoints;
-        breakdown.totalBonus = bonusPoints;
         
         // Limitar entre 0 e 100
         finalScore = Math.min(100, Math.round(Math.max(0, finalScore)));
