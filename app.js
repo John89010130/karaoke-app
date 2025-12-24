@@ -2198,10 +2198,15 @@ async function handleGoogleLogin() {
     // Fechar modal antes de redirecionar para Google
     closeAuthModal();
     
+    // URL de produção do GitHub Pages
+    const redirectUrl = window.location.hostname === 'localhost' 
+        ? 'http://localhost:3000'
+        : 'https://john89010130.github.io/karaoke-app/';
+    
     const { data, error } = await supabaseClient.auth.signInWithOAuth({
         provider: 'google',
         options: {
-            redirectTo: window.location.origin
+            redirectTo: redirectUrl
         }
     });
     
