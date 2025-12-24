@@ -76,17 +76,18 @@
             padding: 1.5rem 2rem;
             overflow: hidden;
             width: 100%;
+            min-height: 0;
+            height: 100%;
         }
 
         /* Lado esquerdo - Vídeo e controles */
         .video-section {
             display: flex;
             flex-direction: column;
-            min-height: 0; /* Permite scroll interno */
+            gap: 1rem;
+            min-height: 0;
             overflow-y: auto;
             overflow-x: hidden;
-        }
-            gap: 1rem;
         }
 
         .search-bar {
