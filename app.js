@@ -1526,26 +1526,26 @@ function calculateFinalScore() {
     let breakdown = {};
     
     if (notes.length > 0) {
-        // 1. PITCH SCORE (35%) - Estabilidade das notas
+        // 1. PITCH SCORE (35%) - Estabilidade das notas (mais rigoroso)
         const pitchVariance = calculateVariance(pitchHistory);
-        const pitchStability = Math.max(0, 100 - (pitchVariance / 100));
+        const pitchStability = Math.max(0, 100 - (pitchVariance / 50)); // Mais sensível à variação
         breakdown.pitchScore = Math.round(pitchStability * 0.35);
         
         // 2. RHYTHM SCORE (30%) - Consistência temporal
         const avgRhythm = rhythmScores.reduce((a, b) => a + b, 0) / rhythmScores.length || 0;
         breakdown.rhythmScore = Math.round(avgRhythm * 0.30);
         
-        // 3. VOLUME/CONSISTENCY SCORE (20%) - Consistência de volume
+        // 3. VOLUME/CONSISTENCY SCORE (20%) - Consistência de volume (mais rigoroso)
         const volumeVariance = calculateVariance(volumeHistory);
-        const volumeConsistency = Math.max(0, 100 - (volumeVariance / 10));
+        const volumeConsistency = Math.max(0, 100 - (volumeVariance / 5)); // Mais sensível
         breakdown.volumeScore = Math.round(volumeConsistency * 0.20);
         
-        // 4. PERFORMANCE SCORE (15%) - Duração e quantidade de notas
+        // 4. PERFORMANCE SCORE (15%) - Quantidade mínima de notas necessária
         const notesPerSecond = notes.length / duration;
-        const performanceQuality = Math.min(100, notesPerSecond * 20);
+        const performanceQuality = Math.min(100, notesPerSecond * 15); // Reduzido de 20 para 15
         breakdown.performanceScore = Math.round(performanceQuality * 0.15);
         
-        // Score base
+        // Score base (máximo de 100 pontos)
         finalScore = breakdown.pitchScore + breakdown.rhythmScore + 
                     breakdown.volumeScore + breakdown.performanceScore;
         
@@ -1556,38 +1556,46 @@ function calculateFinalScore() {
             hard: 1.3
         };
         
+        // Multiplicador de dificuldade aplicado ao score base
         finalScore *= difficultyMultiplier[difficulty];
         
-        // Bônus por tempo cantado
-        if (duration > 60) finalScore += 5;
-        if (duration > 120) finalScore += 10;
-        
-        // Bônus por muitas notas capturadas
-        if (notes.length > 100) finalScore += 5;
-        if (notes.length > 200) finalScore += 10;
-        
-        // BÔNUS DE STREAK (continuidade excepcional)
-        const streakBonus = Math.min(15, Math.floor(maxStreak / 10) * 2); // +2 pts a cada 10 notas de streak
-        finalScore += streakBonus;
-        breakdown.streakBonus = streakBonus;
-        
-        // COBERTURA (% do tempo cantando)
+        // COBERTURA (% do tempo cantando) - CRÍTICO
         const totalDuration = duration * 1000;
         const coverage = (coverageTime / totalDuration) * 100;
         breakdown.coverage = Math.round(coverage);
         
-        // PENALIZAÇÃO POR PAUSAS EXCESSIVAS
-        if (coverage < 50) {
-            // Se cantou menos de 50% do tempo, penaliza
-            const coveragePenalty = Math.round((50 - coverage) * 0.3); // 0.3 pts por % faltante
+        // PENALIZAÇÃO SEVERA POR BAIXA COBERTURA
+        if (coverage < 70) {
+            // Se cantou menos de 70% do tempo, penaliza fortemente
+            const coveragePenalty = Math.round((70 - coverage) * 0.8); // 0.8 pts por % faltante
             finalScore -= coveragePenalty;
             breakdown.coveragePenalty = coveragePenalty;
         }
         
-        // DEDUÇÃO ACUMULADA POR PAUSAS LONGAS
+        // DEDUÇÃO POR PAUSAS LONGAS
         finalScore -= Math.round(silencePenalty);
         breakdown.silencePenalty = Math.round(silencePenalty);
         
+        // Pequenos bônus (máximo +10 pontos no total)
+        let bonusPoints = 0;
+        
+        // Bônus por duração (máx +3)
+        if (duration > 60) bonusPoints += 1;
+        if (duration > 120) bonusPoints += 2;
+        
+        // Bônus por notas (máx +3)
+        if (notes.length > 100) bonusPoints += 1;
+        if (notes.length > 200) bonusPoints += 2;
+        
+        // Bônus por streak (máx +4)
+        const streakBonus = Math.min(4, Math.floor(maxStreak / 20)); // +1 pt a cada 20 notas
+        bonusPoints += streakBonus;
+        breakdown.streakBonus = streakBonus;
+        
+        finalScore += bonusPoints;
+        breakdown.totalBonus = bonusPoints;
+        
+        // Limitar entre 0 e 100
         finalScore = Math.min(100, Math.round(Math.max(0, finalScore)));
     } else {
         finalScore = 0;
