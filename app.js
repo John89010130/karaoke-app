@@ -958,12 +958,17 @@ function analyzeAudioLoop() {
                 
                 // Atualizar tempo de última voz
                 const silenceDuration = currentTime - lastVoiceTime;
+                
+                // Acumular tempo cantando (se não é a primeira detecção)
+                if (lastVoiceTime > 0 && silenceDuration < 1000) {
+                    coverageTime += silenceDuration;
+                }
+                
                 lastVoiceTime = currentTime;
                 
                 // Gerenciar streak (sequência contínua)
                 if (silenceDuration < 1000) { // Se pausa < 1s, mantém streak
                     currentStreak++;
-                    coverageTime += silenceDuration;
                 } else {
                     // Pausa longa quebrou o streak
                     if (currentStreak > maxStreak) {
@@ -1335,7 +1340,14 @@ function updateRealtimeMetrics() {
     currentScore -= silencePenalty;
     
     // CÁLCULO DE COBERTURA (% do tempo cantando)
-    const coverage = duration > 0 ? (coverageTime / (duration * 1000)) * 100 : 0;
+    const totalMs = duration * 1000;
+    const coverage = totalMs > 0 ? (coverageTime / totalMs) * 100 : 0;
+    
+    // Aplicar penalização leve por baixa cobertura também em tempo real
+    if (coverage < 50) {
+        const coveragePenalty = Math.round((50 - coverage) * 0.15);
+        currentScore -= coveragePenalty;
+    }
     
     // Ajustar por dificuldade
     const difficulty = document.getElementById('difficulty').value;
@@ -1559,15 +1571,15 @@ function calculateFinalScore() {
         // Multiplicador de dificuldade aplicado ao score base
         finalScore *= difficultyMultiplier[difficulty];
         
-        // COBERTURA (% do tempo cantando) - CRÍTICO
+        // COBERTURA (% do tempo cantando) - Ajuste proporcional
         const totalDuration = duration * 1000;
         const coverage = (coverageTime / totalDuration) * 100;
         breakdown.coverage = Math.round(coverage);
         
-        // PENALIZAÇÃO SEVERA POR BAIXA COBERTURA
-        if (coverage < 70) {
-            // Se cantou menos de 70% do tempo, penaliza fortemente
-            const coveragePenalty = Math.round((70 - coverage) * 0.8); // 0.8 pts por % faltante
+        // PENALIZAÇÃO SUAVE POR BAIXA COBERTURA (sem exageros)
+        if (coverage < 50) {
+            // Penalização leve e proporcional
+            const coveragePenalty = Math.round((50 - coverage) * 0.15); // 0.15 pts por % faltante
             finalScore -= coveragePenalty;
             breakdown.coveragePenalty = coveragePenalty;
         }
